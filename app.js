@@ -1,4 +1,4 @@
-// app.js — API QCM prête pour Render
+// app.js — API QCM/AgenceEco (Render-ready, articles CRUD)
 
 require('dotenv').config();
 const express = require('express');
@@ -11,15 +11,21 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// --------- CORS (domaines séparés par virgules dans CORS_ORIGIN) ----------
-const allowed = (process.env.CORS_ORIGIN || '*')
+/* =========================
+   CORS (liste, sans slash)
+   ========================= */
+const allowedRaw = (process.env.CORS_ORIGIN || '*')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
+const allowed = allowedRaw.map(u => u.replace(/\/$/, '')); // retire slash final
 
 app.use(cors({
   origin(origin, cb) {
-    if (allowed.includes('*') || !origin || allowed.includes(origin)) return cb(null, true);
+    // Requêtes serveur à serveur (pas d'Origin) → OK
+    if (!origin) return cb(null, true);
+    const o = origin.replace(/\/$/, '');
+    if (allowed.includes('*') || allowed.includes(o)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
   }
 }));
@@ -28,50 +34,56 @@ app.use(bodyParser.json());
 // Render est derrière un proxy
 app.set('trust proxy', 1);
 
-// --------- Config / Secrets ----------
+/* =========================
+   Config / Secrets
+   ========================= */
 const SECRET_KEY = process.env.SECRET_KEY || 'dev_only_change_me';
 if (!process.env.SECRET_KEY) {
   console.warn('⚠️  SECRET_KEY non défini (OK en local), mets-le dans Render > Environment');
 }
 
-// --------- Données démo (remplace par ta vraie persistance) ----------
+/* =========================
+   Données démo (in-memory)
+   ========================= */
 const users = [
   { id: 1, email: 'john@example.com', password: bcrypt.hashSync('password123', 10), name: 'John Doe' },
   { id: 2, email: 'jane@example.com', password: bcrypt.hashSync('mypassword', 10), name: 'Jane Smith' }
 ];
 
 let articles = [
-{
-        id: 1,
-        title: "Les bases de Node.js",
-        description: "Introduction aux concepts fondamentaux de Node.js",
-        content: "Node.js est un environnement d'exécution JavaScript orienté serveur. Il permet de créer des applications back-end performantes et évolutives...",
-        publicationDate: "2023-01-01",
-    },
-    {
-        id: 2,
-        title: "REST API avec Express",
-        description: "Comment créer une API REST avec Express.js",
-        content: "Express est un framework minimaliste et flexible pour Node.js. Il facilite la création d'API robustes, et permet de gérer facilement les routes, les middlewares et les réponses HTTP...",
-        publicationDate: "2023-02-15",
-    },
-    {
-        id: 3,
-        title: "L’éco-conception web expliquée",
-        description: "Pourquoi l'éco-conception est essentielle dans le développement moderne.",
-        content: "L’éco-conception consiste à minimiser l’impact environnemental d’un site web tout en maintenant sa performance...",
-        publicationDate: "2023-03-20",
-    },
-    {
-        id: 4,
-        title: "Les bonnes pratiques du HTML sémantique",
-        description: "Un site web accessible commence par une structure HTML claire.",
-        content: "Utiliser les bonnes balises HTML (comme <article>, <section>, <nav>, etc.) améliore l’accessibilité et le référencement naturel...",
-        publicationDate: "2023-04-05",
-    }
+  {
+    id: 1,
+    title: "Les bases de Node.js",
+    description: "Introduction aux concepts fondamentaux de Node.js",
+    content: "Node.js est un environnement d'exécution JavaScript orienté serveur. Il permet de créer des applications back-end performantes et évolutives...",
+    publicationDate: "2023-01-01",
+  },
+  {
+    id: 2,
+    title: "REST API avec Express",
+    description: "Comment créer une API REST avec Express.js",
+    content: "Express est un framework minimaliste et flexible pour Node.js. Il facilite la création d'API robustes, et permet de gérer facilement les routes, les middlewares et les réponses HTTP...",
+    publicationDate: "2023-02-15",
+  },
+  {
+    id: 3,
+    title: "L’éco-conception web expliquée",
+    description: "Pourquoi l'éco-conception est essentielle dans le développement moderne.",
+    content: "L’éco-conception consiste à minimiser l’impact environnemental d’un site web tout en maintenant sa performance...",
+    publicationDate: "2023-03-20",
+  },
+  {
+    id: 4,
+    title: "Les bonnes pratiques du HTML sémantique",
+    description: "Un site web accessible commence par une structure HTML claire.",
+    content: "Utiliser les bonnes balises HTML (comme <article>, <section>, <nav>, etc.) améliore l’accessibilité et le référencement naturel...",
+    publicationDate: "2023-04-05",
+  }
 ];
 
-// --------- Auth (JWT Bearer) ----------
+/* =========================
+   Auth (JWT Bearer)
+   ========================= */
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
@@ -94,12 +106,31 @@ app.post('/auth/login', (req, res) => {
   res.json({ token, user: { id: u.id, email: u.email, name: u.name } });
 });
 
-// --------- Articles (exemples) ----------
+/* =========================
+   Helpers Articles
+   ========================= */
+const getArticleDate = (a) => a?.publicationDate || a?.date || null;
+const normalizeToISO = (v) => {
+  if (!v) return new Date().toISOString();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return new Date(v + 'T00:00:00Z').toISOString();
+  return new Date(v).toISOString();
+};
+
+/* =========================
+   Articles (CRUD)
+   ========================= */
+
+// LISTE
 app.get('/articles', (_req, res) => {
-  const sorted = [...articles].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const sorted = [...articles].sort((a, b) => {
+    const da = new Date(getArticleDate(a) || 0);
+    const db = new Date(getArticleDate(b) || 0);
+    return db - da;
+  });
   res.json(sorted);
 });
 
+// DÉTAIL
 app.get('/articles/:id', (req, res) => {
   const id = Number(req.params.id);
   const a = articles.find(x => x.id === id);
@@ -107,14 +138,51 @@ app.get('/articles/:id', (req, res) => {
   res.json(a);
 });
 
+// CRÉATION
 app.post('/articles', auth, (req, res) => {
-  const { title, description, content, date } = req.body || {};
+  const { title, description, content, publicationDate, date } = req.body || {};
+
+  const errors = {};
+  if (!title || String(title).trim().length < 3) errors.title = 'Le titre doit contenir au moins 3 caractères';
+  if (!content || String(content).trim().length < 10) errors.content = 'Le contenu doit contenir au moins 10 caractères';
+  if (Object.keys(errors).length) return res.status(400).json({ errors });
+
   const id = Math.max(0, ...articles.map(a => a.id)) + 1;
-  const item = { id, title, description, content, date: date || new Date().toISOString() };
+  const pubISO = normalizeToISO(publicationDate || date || new Date().toISOString());
+
+  const item = { id, title, description: description ?? '', content, publicationDate: pubISO };
   articles.push(item);
   res.status(201).json(item);
 });
 
+// MISE À JOUR
+app.put('/articles/:id', auth, (req, res) => {
+  const id = Number(req.params.id);
+  const idx = articles.findIndex(a => a.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Article introuvable' });
+
+  const { title, description, content, publicationDate, date } = req.body || {};
+
+  const errors = {};
+  if (title !== undefined && String(title).trim().length < 3) errors.title = 'Le titre doit contenir au moins 3 caractères';
+  if (content !== undefined && String(content).trim().length < 10) errors.content = 'Le contenu doit contenir au moins 10 caractères';
+  if (Object.keys(errors).length) return res.status(400).json({ errors });
+
+  const current = articles[idx];
+  const pubISO = normalizeToISO(publicationDate ?? date ?? current.publicationDate ?? current.date ?? new Date().toISOString());
+
+  articles[idx] = {
+    ...current,
+    title:        title        ?? current.title,
+    description:  description  ?? current.description,
+    content:      content      ?? current.content,
+    publicationDate: pubISO
+  };
+
+  res.json(articles[idx]);
+});
+
+// SUPPRESSION
 app.delete('/articles/:id', auth, (req, res) => {
   const id = Number(req.params.id);
   const idx = articles.findIndex(x => x.id === id);
@@ -123,11 +191,33 @@ app.delete('/articles/:id', auth, (req, res) => {
   res.json({ ok: true, removed });
 });
 
-// --------- Health + Root ----------
+/* =========================
+   Aliases optionnels (/api/*, /news/*)
+   ========================= */
+// liste & détail
+app.get(['/api/articles', '/news', '/api/news'], (_req, res) => res.json(articles));
+app.get(['/api/articles/:id', '/news/:id', '/api/news/:id'], (req, res) => {
+  const id = Number(req.params.id);
+  const a = articles.find(x => x.id === id);
+  if (!a) return res.status(404).json({ error: 'Article introuvable' });
+  res.json(a);
+});
+// update via alias
+app.put(['/api/articles/:id', '/news/:id', '/api/news/:id'], auth, (req, res) => {
+  // réutilise la logique de /articles/:id
+  req.url = `/articles/${req.params.id}`;
+  app._router.handle(req, res);
+});
+
+/* =========================
+   Health + Root
+   ========================= */
 app.get('/health', (_req, res) => res.send('ok'));
 app.get('/', (_req, res) => res.send('API QCM/AgenceEco OK'));
 
-// --------- Swagger ----------
+/* =========================
+   Swagger (minimal)
+   ========================= */
 const swaggerSpec = swaggerJsdoc({
   definition: {
     openapi: '3.0.0',
@@ -137,10 +227,12 @@ const swaggerSpec = swaggerJsdoc({
       securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } }
     }
   },
-  apis: [] // Ajoute des fichiers avec JSDoc @openapi si tu veux documenter tes routes.
+  apis: []
 });
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { explorer: true }));
 
-// --------- Lancement (Render fournit PORT) ----------
+/* =========================
+   Boot
+   ========================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`API running on :${PORT}`));
