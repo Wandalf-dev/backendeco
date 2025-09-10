@@ -41,8 +41,34 @@ const users = [
 ];
 
 let articles = [
-  { id: 1, title: 'Les bases de Node.js', description: 'Intro Node', content: '...', date: '2025-09-01T09:00:00Z' },
-  { id: 2, title: 'Express avancé', description: 'Middleware & co', content: '...', date: '2025-09-05T12:00:00Z' }
+{
+        id: 1,
+        title: "Les bases de Node.js",
+        description: "Introduction aux concepts fondamentaux de Node.js",
+        content: "Node.js est un environnement d'exécution JavaScript orienté serveur. Il permet de créer des applications back-end performantes et évolutives...",
+        publicationDate: "2023-01-01",
+    },
+    {
+        id: 2,
+        title: "REST API avec Express",
+        description: "Comment créer une API REST avec Express.js",
+        content: "Express est un framework minimaliste et flexible pour Node.js. Il facilite la création d'API robustes, et permet de gérer facilement les routes, les middlewares et les réponses HTTP...",
+        publicationDate: "2023-02-15",
+    },
+    {
+        id: 3,
+        title: "L’éco-conception web expliquée",
+        description: "Pourquoi l'éco-conception est essentielle dans le développement moderne.",
+        content: "L’éco-conception consiste à minimiser l’impact environnemental d’un site web tout en maintenant sa performance...",
+        publicationDate: "2023-03-20",
+    },
+    {
+        id: 4,
+        title: "Les bonnes pratiques du HTML sémantique",
+        description: "Un site web accessible commence par une structure HTML claire.",
+        content: "Utiliser les bonnes balises HTML (comme <article>, <section>, <nav>, etc.) améliore l’accessibilité et le référencement naturel...",
+        publicationDate: "2023-04-05",
+    }
 ];
 
 // --------- Auth (JWT Bearer) ----------
