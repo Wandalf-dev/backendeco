@@ -1,3 +1,6 @@
+// app.js — API QCM prête pour Render
+
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const swaggerUi = require('swagger-ui-express');
@@ -7,298 +10,111 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-app.use(cors());
+
+// --------- CORS (domaines séparés par virgules dans CORS_ORIGIN) ----------
+const allowed = (process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, cb) {
+    if (allowed.includes('*') || !origin || allowed.includes(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  }
+}));
 app.use(bodyParser.json());
 
-const SECRET_KEY = "votre_cle_secrete";
+// Render est derrière un proxy
+app.set('trust proxy', 1);
 
-// Utilisateurs avec mots de passe hachés
+// --------- Config / Secrets ----------
+const SECRET_KEY = process.env.SECRET_KEY || 'dev_only_change_me';
+if (!process.env.SECRET_KEY) {
+  console.warn('⚠️  SECRET_KEY non défini (OK en local), mets-le dans Render > Environment');
+}
+
+// --------- Données démo (remplace par ta vraie persistance) ----------
 const users = [
-    {
-        id: 1,
-        email: "john@example.com",
-        password: bcrypt.hashSync("password123", 10),
-        name: "John Doe",
-    },
-    {
-        id: 2,
-        email: "jane@example.com",
-        password: bcrypt.hashSync("mypassword", 10),
-        name: "Jane Smith",
-    },
+  { id: 1, email: 'john@example.com', password: bcrypt.hashSync('password123', 10), name: 'John Doe' },
+  { id: 2, email: 'jane@example.com', password: bcrypt.hashSync('mypassword', 10), name: 'Jane Smith' }
 ];
 
-// Articles enrichis
-const articles = [
-    {
-        id: 1,
-        title: "Les bases de Node.js",
-        description: "Introduction aux concepts fondamentaux de Node.js",
-        content: "Node.js est un environnement d'exécution JavaScript orienté serveur. Il permet de créer des applications back-end performantes et évolutives...",
-        publicationDate: "2023-01-01",
-    },
-    {
-        id: 2,
-        title: "REST API avec Express",
-        description: "Comment créer une API REST avec Express.js",
-        content: "Express est un framework minimaliste et flexible pour Node.js. Il facilite la création d'API robustes, et permet de gérer facilement les routes, les middlewares et les réponses HTTP...",
-        publicationDate: "2023-02-15",
-    },
-    {
-        id: 3,
-        title: "L’éco-conception web expliquée",
-        description: "Pourquoi l'éco-conception est essentielle dans le développement moderne.",
-        content: "L’éco-conception consiste à minimiser l’impact environnemental d’un site web tout en maintenant sa performance...",
-        publicationDate: "2023-03-20",
-    },
-    {
-        id: 4,
-        title: "Les bonnes pratiques du HTML sémantique",
-        description: "Un site web accessible commence par une structure HTML claire.",
-        content: "Utiliser les bonnes balises HTML (comme <article>, <section>, <nav>, etc.) améliore l’accessibilité et le référencement naturel...",
-        publicationDate: "2023-04-05",
-    }
+let articles = [
+  { id: 1, title: 'Les bases de Node.js', description: 'Intro Node', content: '...', date: '2025-09-01T09:00:00Z' },
+  { id: 2, title: 'Express avancé', description: 'Middleware & co', content: '...', date: '2025-09-05T12:00:00Z' }
 ];
 
-/**
- * @swagger
- * components:
- *   schemas:
- *     Article:
- *       type: object
- *       required:
- *         - title
- *         - description
- *         - content
- *       properties:
- *         id:
- *           type: integer
- *         title:
- *           type: string
- *         description:
- *           type: string
- *         content:
- *           type: string
- *         publicationDate:
- *           type: string
- *           format: date
- */
+// --------- Auth (JWT Bearer) ----------
+function auth(req, res, next) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Token manquant' });
+  try {
+    req.user = jwt.verify(token, SECRET_KEY);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Token invalide' });
+  }
+}
 
-/**
- * @swagger
- * /login:
- *   post:
- *     summary: Authentification des utilisateurs
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               email:
- *                 type: string
- *               password:
- *                 type: string
- *     responses:
- *       200:
- *         description: Authentification réussie
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 token:
- *                   type: string
- *       401:
- *         description: Email ou mot de passe incorrect
- */
-app.post('/login', (req, res) => {
-    const { email, password } = req.body;
-
-    const user = users.find(u => u.email === email);
-    if (!user) {
-        return res.status(401).json({ message: "Email ou mot de passe incorrect" });
-    }
-
-    const isPasswordValid = bcrypt.compareSync(password, user.password);
-    if (!isPasswordValid) {
-        return res.status(401).json({ message: "Email ou mot de passe incorrect" });
-    }
-
-    const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, { expiresIn: '1h' });
-    res.status(200).json({ token });
+app.post('/auth/login', (req, res) => {
+  const { email, password } = req.body || {};
+  const u = users.find(x => x.email === email);
+  if (!u || !bcrypt.compareSync(password, u.password)) {
+    return res.status(401).json({ error: 'Identifiants invalides' });
+  }
+  const token = jwt.sign({ id: u.id, email: u.email, name: u.name }, SECRET_KEY, { expiresIn: '7d' });
+  res.json({ token, user: { id: u.id, email: u.email, name: u.name } });
 });
 
-/**
- * @swagger
- * /articles:
- *   get:
- *     summary: Retourne la liste de tous les articles
- *     tags: [Articles]
- *     responses:
- *       200:
- *         description: Liste des articles
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 $ref: '#/components/schemas/Article'
- */
-app.get('/articles', (req, res) => {
-    res.status(200).json(articles);
+// --------- Articles (exemples) ----------
+app.get('/articles', (_req, res) => {
+  const sorted = [...articles].sort((a, b) => new Date(b.date) - new Date(a.date));
+  res.json(sorted);
 });
 
-/**
- * @swagger
- * /articles/{id}:
- *   get:
- *     summary: Récupère un article par son ID
- *     tags: [Articles]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Article récupéré avec succès
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Article'
- *       404:
- *         description: Article non trouvé
- */
 app.get('/articles/:id', (req, res) => {
-    const article = articles.find(a => a.id === parseInt(req.params.id));
-    if (!article) {
-        return res.status(404).send('Article non trouvé');
+  const id = Number(req.params.id);
+  const a = articles.find(x => x.id === id);
+  if (!a) return res.status(404).json({ error: 'Article introuvable' });
+  res.json(a);
+});
+
+app.post('/articles', auth, (req, res) => {
+  const { title, description, content, date } = req.body || {};
+  const id = Math.max(0, ...articles.map(a => a.id)) + 1;
+  const item = { id, title, description, content, date: date || new Date().toISOString() };
+  articles.push(item);
+  res.status(201).json(item);
+});
+
+app.delete('/articles/:id', auth, (req, res) => {
+  const id = Number(req.params.id);
+  const idx = articles.findIndex(x => x.id === id);
+  if (idx === -1) return res.status(404).json({ error: 'Article introuvable' });
+  const removed = articles.splice(idx, 1)[0];
+  res.json({ ok: true, removed });
+});
+
+// --------- Health + Root ----------
+app.get('/health', (_req, res) => res.send('ok'));
+app.get('/', (_req, res) => res.send('API QCM/AgenceEco OK'));
+
+// --------- Swagger ----------
+const swaggerSpec = swaggerJsdoc({
+  definition: {
+    openapi: '3.0.0',
+    info: { title: 'QCM / AgenceEco API', version: '1.0.0' },
+    servers: process.env.SWAGGER_PUBLIC_URL ? [{ url: process.env.SWAGGER_PUBLIC_URL }] : [],
+    components: {
+      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } }
     }
-    res.status(200).json(article);
+  },
+  apis: [] // Ajoute des fichiers avec JSDoc @openapi si tu veux documenter tes routes.
 });
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { explorer: true }));
 
-/**
- * @swagger
- * /articles:
- *   post:
- *     summary: Crée un nouvel article
- *     tags: [Articles]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/Article'
- *     responses:
- *       201:
- *         description: Article créé avec succès
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/Article'
- */
-app.post('/articles', (req, res) => {
-    const newArticle = {
-        id: articles.length + 1,
-        title: req.body.title,
-        description: req.body.description,
-        content: req.body.content,
-        publicationDate: req.body.publicationDate || new Date().toISOString().split('T')[0],
-    };
-    articles.push(newArticle);
-    res.status(201).json(newArticle);
-});
-
-/**
- * @swagger
- * /articles/{id}:
- *   put:
- *     summary: Met à jour un article
- *     tags: [Articles]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/Article'
- *     responses:
- *       200:
- *         description: Article mis à jour
- *       404:
- *         description: Article non trouvé
- */
-app.put('/articles/:id', (req, res) => {
-    const article = articles.find(a => a.id === parseInt(req.params.id));
-    if (!article) {
-        return res.status(404).send('Article non trouvé');
-    }
-
-    article.title = req.body.title || article.title;
-    article.description = req.body.description || article.description;
-    article.content = req.body.content || article.content;
-    article.publicationDate = req.body.publicationDate || article.publicationDate;
-
-    res.status(200).json(article);
-});
-
-/**
- * @swagger
- * /articles/{id}:
- *   delete:
- *     summary: Supprime un article
- *     tags: [Articles]
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Article supprimé
- *       404:
- *         description: Article non trouvé
- */
-app.delete('/articles/:id', (req, res) => {
-    const index = articles.findIndex(a => a.id === parseInt(req.params.id));
-    if (index === -1) {
-        return res.status(404).send('Article non trouvé');
-    }
-    articles.splice(index, 1);
-    res.status(200).send('Article supprimé avec succès');
-});
-
-// Swagger setup
-const options = {
-    definition: {
-        openapi: '3.0.0',
-        info: {
-            title: 'AgencEco Articles API',
-            version: '1.0.0',
-            description: 'API pour la gestion des actualités du site AgencEco',
-        },
-    },
-    apis: ['./app.js'],
-};
-const openapiSpecification = swaggerJsdoc(options);
-
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openapiSpecification));
-
-// ❌ À SUPPRIMER (ne pas laisser de app.listen sur Vercel)
-// app.listen(3000, () => {
-//   console.log('✅ Serveur lancé sur http://localhost:3000');
-//   console.log('📚 Swagger dispo sur http://localhost:3000/api-docs');
-// });
-
-// ✅ À METTRE À LA PLACE (export handler pour Vercel)
-module.exports = (req, res) => app(req, res);
+// --------- Lancement (Render fournit PORT) ----------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`API running on :${PORT}`));
