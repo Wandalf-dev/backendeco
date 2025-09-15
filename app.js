@@ -8,6 +8,7 @@ const swaggerJsdoc = require('swagger-jsdoc');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const path = require('path'); // ✅ pour chemin absolu swagger
 
 const app = express();
 
@@ -18,12 +19,11 @@ const allowedRaw = (process.env.CORS_ORIGIN || '*')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
-const allowed = allowedRaw.map(u => u.replace(/\/$/, '')); // retire slash final
+const allowed = allowedRaw.map(u => u.replace(/\/$/, ''));
 
 app.use(cors({
   origin(origin, cb) {
-    // Requêtes serveur à serveur (pas d'Origin) → OK
-    if (!origin) return cb(null, true);
+    if (!origin) return cb(null, true); // OK pour serveur à serveur
     const o = origin.replace(/\/$/, '');
     if (allowed.includes('*') || allowed.includes(o)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
@@ -51,34 +51,10 @@ const users = [
 ];
 
 let articles = [
-  {
-    id: 1,
-    title: "Les bases de Node.js",
-    description: "Introduction aux concepts fondamentaux de Node.js",
-    content: "Node.js est un environnement d'exécution JavaScript orienté serveur. Il permet de créer des applications back-end performantes et évolutives...",
-    publicationDate: "2023-01-01",
-  },
-  {
-    id: 2,
-    title: "REST API avec Express",
-    description: "Comment créer une API REST avec Express.js",
-    content: "Express est un framework minimaliste et flexible pour Node.js. Il facilite la création d'API robustes, et permet de gérer facilement les routes, les middlewares et les réponses HTTP...",
-    publicationDate: "2023-02-15",
-  },
-  {
-    id: 3,
-    title: "L’éco-conception web expliquée",
-    description: "Pourquoi l'éco-conception est essentielle dans le développement moderne.",
-    content: "L’éco-conception consiste à minimiser l’impact environnemental d’un site web tout en maintenant sa performance...",
-    publicationDate: "2023-03-20",
-  },
-  {
-    id: 4,
-    title: "Les bonnes pratiques du HTML sémantique",
-    description: "Un site web accessible commence par une structure HTML claire.",
-    content: "Utiliser les bonnes balises HTML (comme <article>, <section>, <nav>, etc.) améliore l’accessibilité et le référencement naturel...",
-    publicationDate: "2023-04-05",
-  }
+  { id: 1, title: "Les bases de Node.js", description: "Intro Node.js", content: "Node.js est un environnement...", publicationDate: "2023-01-01" },
+  { id: 2, title: "REST API avec Express", description: "Créer une API", content: "Express est un framework...", publicationDate: "2023-02-15" },
+  { id: 3, title: "L’éco-conception web", description: "Impact environnemental", content: "L’éco-conception consiste à...", publicationDate: "2023-03-20" },
+  { id: 4, title: "Bonnes pratiques HTML", description: "Accessibilité", content: "Utiliser les bonnes balises...", publicationDate: "2023-04-05" }
 ];
 
 /* =========================
@@ -119,18 +95,11 @@ const normalizeToISO = (v) => {
 /* =========================
    Articles (CRUD)
    ========================= */
-
-// LISTE
 app.get('/articles', (_req, res) => {
-  const sorted = [...articles].sort((a, b) => {
-    const da = new Date(getArticleDate(a) || 0);
-    const db = new Date(getArticleDate(b) || 0);
-    return db - da;
-  });
+  const sorted = [...articles].sort((a, b) => new Date(getArticleDate(b)) - new Date(getArticleDate(a)));
   res.json(sorted);
 });
 
-// DÉTAIL
 app.get('/articles/:id', (req, res) => {
   const id = Number(req.params.id);
   const a = articles.find(x => x.id === id);
@@ -138,10 +107,8 @@ app.get('/articles/:id', (req, res) => {
   res.json(a);
 });
 
-// CRÉATION
 app.post('/articles', auth, (req, res) => {
   const { title, description, content, publicationDate, date } = req.body || {};
-
   const errors = {};
   if (!title || String(title).trim().length < 3) errors.title = 'Le titre doit contenir au moins 3 caractères';
   if (!content || String(content).trim().length < 10) errors.content = 'Le contenu doit contenir au moins 10 caractères';
@@ -155,14 +122,12 @@ app.post('/articles', auth, (req, res) => {
   res.status(201).json(item);
 });
 
-// MISE À JOUR
 app.put('/articles/:id', auth, (req, res) => {
   const id = Number(req.params.id);
   const idx = articles.findIndex(a => a.id === id);
   if (idx === -1) return res.status(404).json({ error: 'Article introuvable' });
 
   const { title, description, content, publicationDate, date } = req.body || {};
-
   const errors = {};
   if (title !== undefined && String(title).trim().length < 3) errors.title = 'Le titre doit contenir au moins 3 caractères';
   if (content !== undefined && String(content).trim().length < 10) errors.content = 'Le contenu doit contenir au moins 10 caractères';
@@ -171,18 +136,10 @@ app.put('/articles/:id', auth, (req, res) => {
   const current = articles[idx];
   const pubISO = normalizeToISO(publicationDate ?? date ?? current.publicationDate ?? current.date ?? new Date().toISOString());
 
-  articles[idx] = {
-    ...current,
-    title:        title        ?? current.title,
-    description:  description  ?? current.description,
-    content:      content      ?? current.content,
-    publicationDate: pubISO
-  };
-
+  articles[idx] = { ...current, title: title ?? current.title, description: description ?? current.description, content: content ?? current.content, publicationDate: pubISO };
   res.json(articles[idx]);
 });
 
-// SUPPRESSION
 app.delete('/articles/:id', auth, (req, res) => {
   const id = Number(req.params.id);
   const idx = articles.findIndex(x => x.id === id);
@@ -194,7 +151,6 @@ app.delete('/articles/:id', auth, (req, res) => {
 /* =========================
    Aliases optionnels (/api/*, /news/*)
    ========================= */
-// liste & détail
 app.get(['/api/articles', '/news', '/api/news'], (_req, res) => res.json(articles));
 app.get(['/api/articles/:id', '/news/:id', '/api/news/:id'], (req, res) => {
   const id = Number(req.params.id);
@@ -202,9 +158,7 @@ app.get(['/api/articles/:id', '/news/:id', '/api/news/:id'], (req, res) => {
   if (!a) return res.status(404).json({ error: 'Article introuvable' });
   res.json(a);
 });
-// update via alias
 app.put(['/api/articles/:id', '/news/:id', '/api/news/:id'], auth, (req, res) => {
-  // réutilise la logique de /articles/:id
   req.url = `/articles/${req.params.id}`;
   app._router.handle(req, res);
 });
@@ -216,7 +170,7 @@ app.get('/health', (_req, res) => res.send('ok'));
 app.get('/', (_req, res) => res.send('API QCM/AgenceEco OK'));
 
 /* =========================
-   Swagger (minimal)
+   Swagger (corrigé)
    ========================= */
 const swaggerSpec = swaggerJsdoc({
   definition: {
@@ -227,7 +181,7 @@ const swaggerSpec = swaggerJsdoc({
       securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } }
     }
   },
-  apis: []
+  apis: [path.join(__dirname, 'app.js')], // ✅ corrige apis: [] → scan app.js
 });
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { explorer: true }));
 
