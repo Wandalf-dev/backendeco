@@ -1,4 +1,4 @@
-// app.js — API QCM/AgenceEco (Render-ready, articles CRUD)
+// app.js — API QCM/AgenceEco (Render-ready, articles CRUD + Swagger)
 
 require('dotenv').config();
 const express = require('express');
@@ -8,12 +8,12 @@ const swaggerJsdoc = require('swagger-jsdoc');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const path = require('path'); // ✅ pour chemin absolu swagger
+const path = require('path');
 
 const app = express();
 
 /* =========================
-   CORS (liste, sans slash)
+   CORS
    ========================= */
 const allowedRaw = (process.env.CORS_ORIGIN || '*')
   .split(',')
@@ -23,7 +23,7 @@ const allowed = allowedRaw.map(u => u.replace(/\/$/, ''));
 
 app.use(cors({
   origin(origin, cb) {
-    if (!origin) return cb(null, true); // OK pour serveur à serveur
+    if (!origin) return cb(null, true);
     const o = origin.replace(/\/$/, '');
     if (allowed.includes('*') || allowed.includes(o)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
@@ -31,7 +31,6 @@ app.use(cors({
 }));
 app.use(bodyParser.json());
 
-// Render est derrière un proxy
 app.set('trust proxy', 1);
 
 /* =========================
@@ -43,7 +42,7 @@ if (!process.env.SECRET_KEY) {
 }
 
 /* =========================
-   Données démo (in-memory)
+   Données démo
    ========================= */
 const users = [
   { id: 1, email: 'john@example.com', password: bcrypt.hashSync('password123', 10), name: 'John Doe' },
@@ -72,6 +71,42 @@ function auth(req, res, next) {
   }
 }
 
+/**
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     summary: Authentifie un utilisateur
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Authentification réussie
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: integer }
+ *                     email: { type: string }
+ *                     name: { type: string }
+ *       401:
+ *         description: Identifiants invalides
+ */
 app.post('/auth/login', (req, res) => {
   const { email, password } = req.body || {};
   const u = users.find(x => x.email === email);
@@ -95,11 +130,37 @@ const normalizeToISO = (v) => {
 /* =========================
    Articles (CRUD)
    ========================= */
+
+/**
+ * @swagger
+ * /articles:
+ *   get:
+ *     summary: Retourne la liste de tous les articles
+ *     tags: [Articles]
+ *     responses:
+ *       200:
+ *         description: Liste des articles
+ */
 app.get('/articles', (_req, res) => {
   const sorted = [...articles].sort((a, b) => new Date(getArticleDate(b)) - new Date(getArticleDate(a)));
   res.json(sorted);
 });
 
+/**
+ * @swagger
+ * /articles/{id}:
+ *   get:
+ *     summary: Récupère un article par son ID
+ *     tags: [Articles]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Article trouvé }
+ *       404: { description: Article non trouvé }
+ */
 app.get('/articles/:id', (req, res) => {
   const id = Number(req.params.id);
   const a = articles.find(x => x.id === id);
@@ -107,6 +168,30 @@ app.get('/articles/:id', (req, res) => {
   res.json(a);
 });
 
+/**
+ * @swagger
+ * /articles:
+ *   post:
+ *     summary: Crée un nouvel article (auth requis)
+ *     tags: [Articles]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title: { type: string }
+ *               description: { type: string }
+ *               content: { type: string }
+ *               publicationDate: { type: string, format: date }
+ *     responses:
+ *       201: { description: Article créé }
+ *       400: { description: Erreur de validation }
+ *       401: { description: Non autorisé }
+ */
 app.post('/articles', auth, (req, res) => {
   const { title, description, content, publicationDate, date } = req.body || {};
   const errors = {};
@@ -122,6 +207,25 @@ app.post('/articles', auth, (req, res) => {
   res.status(201).json(item);
 });
 
+/**
+ * @swagger
+ * /articles/{id}:
+ *   put:
+ *     summary: Met à jour un article (auth requis)
+ *     tags: [Articles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Article mis à jour }
+ *       400: { description: Erreur de validation }
+ *       401: { description: Non autorisé }
+ *       404: { description: Article introuvable }
+ */
 app.put('/articles/:id', auth, (req, res) => {
   const id = Number(req.params.id);
   const idx = articles.findIndex(a => a.id === id);
@@ -140,6 +244,24 @@ app.put('/articles/:id', auth, (req, res) => {
   res.json(articles[idx]);
 });
 
+/**
+ * @swagger
+ * /articles/{id}:
+ *   delete:
+ *     summary: Supprime un article (auth requis)
+ *     tags: [Articles]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Article supprimé }
+ *       401: { description: Non autorisé }
+ *       404: { description: Article introuvable }
+ */
 app.delete('/articles/:id', auth, (req, res) => {
   const id = Number(req.params.id);
   const idx = articles.findIndex(x => x.id === id);
@@ -149,28 +271,7 @@ app.delete('/articles/:id', auth, (req, res) => {
 });
 
 /* =========================
-   Aliases optionnels (/api/*, /news/*)
-   ========================= */
-app.get(['/api/articles', '/news', '/api/news'], (_req, res) => res.json(articles));
-app.get(['/api/articles/:id', '/news/:id', '/api/news/:id'], (req, res) => {
-  const id = Number(req.params.id);
-  const a = articles.find(x => x.id === id);
-  if (!a) return res.status(404).json({ error: 'Article introuvable' });
-  res.json(a);
-});
-app.put(['/api/articles/:id', '/news/:id', '/api/news/:id'], auth, (req, res) => {
-  req.url = `/articles/${req.params.id}`;
-  app._router.handle(req, res);
-});
-
-/* =========================
-   Health + Root
-   ========================= */
-app.get('/health', (_req, res) => res.send('ok'));
-app.get('/', (_req, res) => res.send('API QCM/AgenceEco OK'));
-
-/* =========================
-   Swagger (corrigé)
+   Swagger setup
    ========================= */
 const swaggerSpec = swaggerJsdoc({
   definition: {
@@ -181,7 +282,7 @@ const swaggerSpec = swaggerJsdoc({
       securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } }
     }
   },
-  apis: [path.join(__dirname, 'app.js')], // ✅ corrige apis: [] → scan app.js
+  apis: [path.join(__dirname, 'app.js')],
 });
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, { explorer: true }));
 
